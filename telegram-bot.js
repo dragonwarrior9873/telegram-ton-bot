@@ -1,48 +1,105 @@
-const TelegramBot = require('node-telegram-bot-api');
+const Telegraf = require('telegraf'); //includeing telegraf lib
 
-// replace the value below with the Telegram token you receive from @BotFather
-const token = '7134153113:AAF04tcxnKMN-A7x3L9TI6jsxeX5719OUQY';
+const bot = new Telegraf('7134153113:AAF04tcxnKMN-A7x3L9TI6jsxeX5719OUQY'); // add your bot token
 
-// Create a bot that uses 'polling' to fetch new updates
-const bot = new TelegramBot(token, {polling: true});
+const axios = require('axios');  // send HTTP/s request and gets respond (info)
+const fs = require('fs');  // reading json files
+const TonWeb = require("tonweb");
+const nacl = require("tweetnacl");
+const { mnemonicToWalletKey, mnemonicNew, mnemonicToPrivateKey } = require("@ton/crypto") ;
+const { TonClient, WalletContractV4, internal } = require("@ton/ton");
 
-let sell_limit, buy_limit;
-// Matches "/echo [whatever]"
-bot.onText(/\/echo (.+)/, (msg, match) => {
-  // 'msg' is the received Message from Telegram
-  // 'match' is the result of executing the regexp above on the text content
-  // of the message
+let wallet, walletAddress = "";
+let mnemonics  = [];
 
-  const chatId = msg.chat.id;
-  const resp = match[1]; // the captured "whatever"
+// Create Client
+const client = new TonClient({
+    endpoint: 'https://toncenter.com/api/v2/jsonRPC',
+  });
 
-  // send back the matched "whatever" to the chat
-  bot.sendMessage(chatId, sell_limit + buy_limit);
-});
+const helpMessage = `
+*TON Controlling API Bot*
+/create - create ton wallet and return privatekey of that wallet.
+/import \`<mnemonicKey>\` - import wallet from wallet address.
+/showkey - show mnemonicKey of ton wallet address of bot.
+/showaddress - show wallet address of bot.
+/getBalance - show balance that address has.
+/pair \`<pair_address>\` \`<sell_limit>\` \`<buy_limit>\` - get pair address and get sell and buy limit.
+/run - run bot.
+/stop - stop bot.
+`;
 
-// Listen for any kind of message. There are different kinds of
-// messages.
-bot.onText(/\/sell limit (.+)/, (msg, match) => {
-  const chatId = msg.chat.id;
-  sell_limit = match[1]; // the captured "whatever"
+bot.help(ctx => {
+    bot.telegram.sendMessage(ctx.chat.id, helpMessage, {
+        parse_mode: "markdown"
+    });
+})
 
-  // send a message to the chat acknowledging receipt of their message
-  bot.sendMessage(chatId, 'Successfully set limit');
-});
+bot.command('create', async ctx => {
+    // Generate new key
+    mnemonics = await mnemonicNew();
+    let keyPair = await mnemonicToPrivateKey(mnemonics);
+    // Create wallet contract
+    let workchain = 0; // Usually you need a workchain 0
+    wallet = WalletContractV4.create({ workchain, publicKey: keyPair.publicKey });
+    walletAddress = wallet.address.toString({ testOnly: true })
+    const response = axios
+    ctx.reply(walletAddress);
+})  
 
-bot.onText(/\/buy limit (.+)/, (msg, match) => {
-    const chatId = msg.chat.id;
-    buy_limit = match[1]; // the captured "whatever"
-  
-    // send a message to the chat acknowledging receipt of their message
-    bot.sendMessage(chatId, 'Successfully set limit');
-});
+bot.command('import', async ctx => {
+    let input = ctx.message.text.split(/\s+/);
+    if(input.length != 25){
+        ctx.reply("Wrong Input");
+        return;
+    }
+    mnemonics = input.slice(1);
+    const key = await mnemonicToWalletKey(mnemonics);
+    const wallet = WalletContractV4.create({ publicKey: key.publicKey, workchain: 0 });
+    walletAddress = wallet.address.toString({ testOnly: true })
 
-// Listen for any kind of message. There are different kinds of
-// messages.
-bot.on('help', (msg) => {
-  const chatId = msg.chat.id;
+    // print wallet address
+    console.log(walletAddress);
+    console.log(key.privateKey);
+    // print wallet workchain
+    console.log("workchain:", wallet.address.workChain);
+    ctx.reply(walletAddress);
+})
 
-  // send a message to the chat acknowledging receipt of their message
-  bot.sendMessage(chatId, 'Received your message');
-});
+bot.command('showaddress', ctx => {
+    ctx.reply(walletAddress);
+})
+
+bot.command('showkey', ctx => {
+    ctx.reply(mnemonics);
+})
+
+bot.command('getBalance', async ctx => {
+    // Get balance
+    if(wallet){
+        let contract = client.open(wallet);
+        let balance = await contract.getBalance();
+        console.log(balance);
+        ctx.reply(BigInt(balance));
+    }
+    else {
+        ctx.reply("Wallet not Connected. Please connect Wallet first!");
+    }
+})
+
+bot.command('run', ctx => {
+    // at the end of your script remmember to add this, else yor bot will not run
+    // bot.launch();
+    ctx.reply("Bot successfully launched...");
+    bot.telegram.sendMessage(ctx.chat.id, helpMessage, {
+        parse_mode: "markdown"
+    });
+})
+
+bot.command('stop', ctx => {
+    // at the end of your script remmember to add this, else yor bot will not run
+    // bot.stop();
+    ctx.reply("Bye....");
+})
+
+bot.launch();
