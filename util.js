@@ -16,7 +16,7 @@ const pairData = {
 
 
 // Making a POST request using Axios
-axios.post(url_wallet_info, postData)
+axios.get(url_pair_info)
   .then(response => {
     console.log('Response:', response.data);
   })

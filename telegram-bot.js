@@ -21,15 +21,19 @@ const client = new TonClient({
   endpoint: 'https://toncenter.com/api/v2/jsonRPC',
 });
 
+const testClient = new TonClient({
+  endpoint: "https://testnet.toncenter.com/api/v2/jsonRPC",
+})
+
 const helpMessage = `
 *TON Controlling API Bot*
-/create - create ton wallet and return privatekey of that wallet.
+/create - create ton wallet and return address of that wallet.
 /import \`<mnemonicKey>\` - import wallet from wallet address.
 /showkey - show mnemonicKey of ton wallet address of bot.
 /showaddress - show wallet address of bot.
 /getBalance - show balance that address has.
-/addPair \`<pair_address>\` \`<sell_limit>\` \`<buy_limit>\` - get pair address and get sell and buy limit.
-/updatePair \`<pair_ID>\` \`<pair_address>\` \`<sell_limit>\` \`<buy_limit>\` - get pair address and get sell and buy limit.
+/addPair \`<jetton0_address>\` \`<jetton1_address>\` \`<sell_limit>\` \`<buy_limit>\` - get pair address and get sell and buy limit.
+/updatePair \`<pair_ID>\` \`<jetton0_address>\` \`<jetton1_address>\` \`<sell_limit>\` \`<buy_limit>\` - get pair address and get sell and buy limit.
 /deletePair \`<pair_ID>\` - delete pair from DB using id.
 /deleteAll - delete all pairs from DB.
 /run - run bot.
@@ -83,16 +87,18 @@ bot.command('showkey', ctx => {
 
 bot.command('addPair', async ctx => {
   let input = ctx.message.text.split(/\s+/);
-  if (input.length != 4) {
+  if (input.length != 5) {
     ctx.reply("Wrong Input");
     return;
   }
-  let pairAddress = input[1];
-  let sell_limit = input[2];
-  let buy_limit = input[3];
+  let jetton0Address = input[1];
+  let jetton1Address = input[2];
+  let sell_limit = input[3];
+  let buy_limit = input[4];
 
   let pairData = {
-    pairContract: pairAddress,
+    jetton0: jetton0Address,
+    jetton1: jetton1Address,
     sell_limit: sell_limit,
     buy_limit: buy_limit
   };
@@ -147,24 +153,26 @@ bot.command('deleteAll', async ctx => {
 
 bot.command('updatePair', async ctx => {
   let input = ctx.message.text.split(/\s+/);
-  if (input.length != 5) {
+  if (input.length != 6) {
     ctx.reply("Wrong Input");
     return;
   }
   let pairID = input[1];
-  let pairAddress = input[2];
-  let sell_limit = input[3];
-  let buy_limit = input[4];
+  let jetton0Address = input[2];
+  let jetton1Address = input[3];
+  let sell_limit = input[4];
+  let buy_limit = input[5];
 
   let pairData = {
-    pairContract: pairAddress,
+    jetton0: jetton0Address,
+    jetton1: jetton1Address,
     sell_limit: sell_limit,
     buy_limit: buy_limit
   };
   // Making a POST request using Axios
   axios.put(`${url_pair_info}/${pairID}`, pairData)
     .then(response => {
-      ctx.reply(`Pair Information successfully updated. Saved Pair Information id is ${response.data.id} and Pair Contract Address is ${response.data.pairContract} `);
+      ctx.reply(`Pair Information successfully updated. Saved Pair Information id is ${response.data.id} and Pair Contract Address is ${response.data.jetton0} and  ${response.data.jetton1}`);
     })
     .catch(error => {
       console.error('Error:', error);
@@ -174,11 +182,15 @@ bot.command('updatePair', async ctx => {
 
 bot.command('getBalance', async ctx => {
   // Get balance
-  if (wallet) {
-    let contract = client.open(wallet);
+  if (walletAddress && mnemonics) {
+    let keyPair = await mnemonicToPrivateKey(mnemonics);
+    // Create wallet contract
+    let workchain = 0; // Usually you need a workchain 0
+    wallet = WalletContractV4.create({ workchain, publicKey: keyPair.publicKey });
+    let contract = testClient.open(wallet);
     let balance = await contract.getBalance();
-    console.log(balance);
-    ctx.reply(BigInt(balance));
+    console.log(BigInt(balance).toString());
+    ctx.reply(BigInt(balance).toString());
   }
   else {
     ctx.reply("Wallet not Connected. Please connect Wallet first!");
@@ -188,8 +200,10 @@ bot.command('getBalance', async ctx => {
 bot.command('run', ctx => {
   if( !walletAddress ){
     ctx.reply("Please Connect Wallet First"); 
+    return;
   }
-  worker.postMessage('Start Worker...');
+  
+  worker.postMessage(walletAddress);
   worker.on('message', (message) => {
     console.log(`Main received message: ${message}`);
     isWorkerDead = false;

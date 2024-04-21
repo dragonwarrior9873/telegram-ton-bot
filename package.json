@@ -10,6 +10,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@ston-fi/sdk": "^0.4.1",
     "@ton/crypto": "^3.2.0",
     "@ton/ton": "^13.11.1",
     "@tonclient/core": "^1.30.0",
