@@ -1,10 +1,9 @@
 const { parentPort } = require('worker_threads');
 const TonWeb = require("tonweb");
 const { Router, ROUTER_REVISION, ROUTER_REVISION_ADDRESS } = require('@ston-fi/sdk');
-const { Factory, MAINNET_FACTORY_ADDR } = requrire('@dedust/sdk');
+const { Factory, MAINNET_FACTORY_ADDR, ReadinessStatus, Asset, VaultNative, JettonRoot, JettonWallet, PoolType } = require('@dedust/sdk');
 const { Address, TonClient4 } = require("@ton/ton");
 const { url_pair_info } = require('./constant');
-const { ReadinessStatus } = require('@dedust/sdk');
 const { toNano } = require('@ton/core');
 const axios = require('axios');  // send HTTP/s request and gets respond (info)
 let pair_infos = [];
@@ -12,30 +11,40 @@ let pair_infos = [];
 parentPort.on('message', async (walletAddress) => {
   console.log(`Worker received message: ${walletAddress}`);
   await axios.get(url_pair_info)
-  .then(response => {
-    if( response.data ) {
-      pair_infos = Array.from(response.data);
-      console.log(pair_infos);
-    }
-  })
-  .catch(error => {
-    console.error('Error:', error);
-  });
-  mainloop(walletAddress)
-  // setInterval( mainloop(walletAddress), 1000);
+    .then(response => {
+      if (response.data) {
+        pair_infos = Array.from(response.data);
+        console.log(pair_infos);
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
   parentPort.postMessage("Bot is Successfully Running");
+  while(true){
+    await mainloop(walletAddress);
+    sleep(1000);
+    if (message === 'terminate') break;s
+  }
+  // setInterval( mainloop(walletAddress), 1000);
 });
 
-function mainloop(walletAddress) {
+async function mainloop(walletAddress) {
   console.log("mainloop");
-  for( let i = 0 ; i < pair_infos.length; i ++){
-    evaluate_ston_fi_limit(walletAddress, pair_infos[i].jetton0, pair_infos[i].jetton1, pair_infos[i].sell_limit, pair_infos[i].buy_limit);
-    evaluate_dedust_limit(walletAddress, pair_infos[i].jetton0, pair_infos[i].jetton1, pair_infos[i].sell_limit, pair_infos[i].buy_limit);
+  for (let i = 0; i < pair_infos.length; i++) {
+    await evaluate_ston_fi_limit(walletAddress, pair_infos[i].jetton0, pair_infos[i].jetton1, pair_infos[i].sell_limit, pair_infos[i].buy_limit);
+    sleep(1000);
+    await evaluate_dedust_limit(walletAddress, pair_infos[i].jetton0, pair_infos[i].jetton1, pair_infos[i].sell_limit, pair_infos[i].buy_limit);
+    sleep(1000);
   }
 }
 
-async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limit, buy_limit){
-  console.log("evaluate_limit");
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limit, buy_limit) {
+  console.log("...............evaluate_ston_fi_limit...................");
   const WALLET_ADDRESS = walletAddress; // ! replace with your address
   // const OWNER_ADDRESS = '0QC3-tDA6CQt6qJ8jZ3StmJmaleEKs896GxT8BrrfUstslMW';
 
@@ -52,7 +61,7 @@ async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limi
     revision: ROUTER_REVISION.V1,
     address: ROUTER_REVISION_ADDRESS.V1,
   });
-
+  await sleep(1000); // Sleep for 2 seconds
   const pool = await router.getPool({
     jettonAddresses: [JETTON0, JETTON1],
   });
@@ -74,10 +83,11 @@ async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limi
   console.log(BigInt(poolData.reserve1).toString());
   let reserveA = Number(BigInt(poolData.reserve0));
   let reserveB = Number(BigInt(poolData.reserve1));
-  if ( reserveB / reserveA > sell_limit)
-  {
+  console.log("------------------");
+  console.log(reserveB / reserveA);
+  if (reserveB / reserveA > sell_limit) {
     console.log("sell_limit");
-      
+    await sleep(1000); // Sleep for 2 seconds
     // transaction to swap 1.0 JETTON0 to JETTON1 but not less than 1 nano JETTON1
     const swapTxParams = await router.buildSwapJettonTxParams({
       // address of the wallet that holds offerJetton you want to swap
@@ -85,7 +95,7 @@ async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limi
       // address of the jetton you want to swap
       offerJettonAddress: JETTON0,
       // amount of the jetton you want to swap
-      offerAmount: new TonWeb.utils.BN('1000000000'),
+      offerAmount: new TonWeb.utils.BN('10000000'),
       // address of the jetton you want to receive
       askJettonAddress: JETTON1,
       // minimal amount of the jetton you want to receive as a result of the swap.
@@ -106,9 +116,9 @@ async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limi
       payload: swapTxParams.payload,
     });
   }
-  else if ( reserveB / reserveA < buy_limit){
+  else if (reserveB / reserveA < buy_limit) {
     console.log("buy_limit");
-      
+    await sleep(1000); // Sleep for 2 seconds
     // transaction to swap 1.0 JETTON0 to JETTON1 but not less than 1 nano JETTON1
     const swapTxParams = await router.buildSwapJettonTxParams({
       // address of the wallet that holds offerJetton you want to swap
@@ -116,7 +126,7 @@ async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limi
       // address of the jetton you want to swap
       offerJettonAddress: JETTON1,
       // amount of the jetton you want to swap
-      offerAmount: new TonWeb.utils.BN('1000000000'),
+      offerAmount: new TonWeb.utils.BN('100000000'),
       // address of the jetton you want to receive
       askJettonAddress: JETTON0,
       // minimal amount of the jetton you want to receive as a result of the swap.
@@ -139,46 +149,56 @@ async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limi
   }
 }
 
-async function evaluate_dedust_limit(walletAddress, jetton0, jetton1, sell_limit, buy_limit){
+async function evaluate_dedust_limit(walletAddress, jetton0, jetton1, sell_limit, buy_limit) {
 
+  // NOTE: We will use tonVault to send a message.
   const tonClient = new TonClient4({ endpoint: "https://mainnet-v4.tonhubapi.com" });
   const factory = tonClient.open(Factory.createFromAddress(MAINNET_FACTORY_ADDR));
-  const Jetton0 = 'EQDQoc5M3Bh8eWFephi9bClhevelbZZvWhkqdo80XuY_0qXv';
-  const Jetton1 = 'EQC_1YoM8RBixN95lz7odcF3Vrkc_N8Ne7gQi7Abtlet_Efi';
-  const tonVault = tonClient.open(await factory.getJettonVault(Jetton0));
-  // const Jetton0 = Address.parse('EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE');
-  // const Jetton1 = Address.parse('EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE');
+  const tonVault = tonClient.open(await factory.getNativeVault());
+  const JETTON0 = Address.parse('EQDQoc5M3Bh8eWFephi9bClhevelbZZvWhkqdo80XuY_0qXv');
+  const JETTON1 = Address.parse('EQC_1YoM8RBixN95lz7odcF3Vrkc_N8Ne7gQi7Abtlet_Efi');
+  const TON = Asset.jetton(JETTON1);
+  const SCALE = Asset.jetton(JETTON0);
 
-  const Jetton0_Asset = Asset.jetton(Jetton0);
-  const Jetton1_Asset = Asset.jetton(Jetton1);
+  const pool = tonClient.open(await factory.getPool(PoolType.VOLATILE, [TON, SCALE]));
 
-  const pool = tonClient.open(await factory.getPool(PoolType.VOLATILE, [Jetton0_Asset, Jetton1_Asset]));
-    // Check if pool exists:
+  // Check if pool exists:
   if ((await pool.getReadinessStatus()) !== ReadinessStatus.READY) {
-    throw new Error('Pool (TON, SCALE) does not exist.');
+    console.log('Pool (TON, SCALE) does not exist.')
   }
 
   // Check if vault exits:
   if ((await tonVault.getReadinessStatus()) !== ReadinessStatus.READY) {
-    throw new Error('Vault (TON) does not exist.');
+    console.log('Vault (TON) does not exist.')
   }
+  const amountIn = toNano('5'); // 5 TON
 
-  let reserve = await pool.get_reserves();
-  let reserveA = Number(BigInt(reserve.reserve0));
-  let reserveB = Number(BigInt(reserve.reserve1));
-  if ( reserveB / reserveA > sell_limit)
-  {
-    const amountIn = toNano('5'); // 5 TON
+  console.log(pool.address);
 
-    await tonVault.sendSwap(sender, {
-      poolAddress: pool.address,
-      amount: amountIn,
-      gasAmount: toNano("0.25"),
-    });
-  }
-  else ( reserveB / reserveA < buy_limit)
-  {
+  // await tonVault.sendSwap(walletAddress, {
+  //   poolAddress: pool.address,
+  //   amount: amountIn,
+  //   gasAmount: toNano("0.25"),
+  // });
 
-  }
+  // let reserve = await pool.get_reserves();
+  // let reserveA = Number(BigInt(reserve.reserve0));
+  // let reserveB = Number(BigInt(reserve.reserve1));
+  // console.log(reserveA);
+  // console.log(reserveB);
+  // if ( reserveB / reserveA > sell_limit)
+  // {
+  //   const amountIn = toNano('5'); // 5 TON
+
+  //   // await tonVault.sendSwap(sender, {
+  //   //   poolAddress: pool.address,
+  //   //   amount: amountIn,
+  //   //   gasAmount: toNano("0.25"),
+  //   // });
+  // }
+  // else ( reserveB / reserveA < buy_limit)
+  // {
+
+  // }
 
 }

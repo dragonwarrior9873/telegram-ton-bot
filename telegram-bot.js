@@ -8,14 +8,14 @@ const TonWeb = require("tonweb");
 const nacl = require("tweetnacl");
 const { mnemonicToWalletKey, mnemonicNew, mnemonicToPrivateKey } = require("@ton/crypto");
 const { TonClient, WalletContractV4, internal } = require("@ton/ton");
-const { url_pair_info } = require('./constant');
+const { url_pair_info, url_wallet_info } = require('./constant');
 const { Worker } = require('worker_threads');
 const worker = new Worker('./worker.js');
 
 let isWorkerDead = true;
 let wallet, walletAddress = "";
 let mnemonics = [];
-
+let wallet_info ;
 // Create Client
 const client = new TonClient({
   endpoint: 'https://toncenter.com/api/v2/jsonRPC',
@@ -54,7 +54,21 @@ bot.command('create', async ctx => {
   let workchain = 0; // Usually you need a workchain 0
   wallet = WalletContractV4.create({ workchain, publicKey: keyPair.publicKey });
   walletAddress = wallet.address.toString({ testOnly: true })  
-  ctx.reply(walletAddress);
+
+  walletData = {
+    wallet_address : walletAddress,
+    mnemonics : JSON.stringify(mnemonics),
+  }
+  axios.post(url_wallet_info, walletData)
+  .then(response => {
+    ctx.reply(`Wallet Information successfully saved. Saved Wallet Information id is ${response.data.id}`);
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    ctx.reply("Failed to save Wallet Information");
+  });
+
+  ctx.reply(`Created Wallet Address is ${walletAddress}`);
 })
 
 bot.command('import', async ctx => {
@@ -72,8 +86,22 @@ bot.command('import', async ctx => {
   console.log(walletAddress);
   console.log(key.privateKey);
   // print wallet workchain
+  
+  walletData = {
+    wallet_address : walletAddress,
+    mnemonics : JSON.stringify(mnemonics),
+  }
+  axios.post(url_wallet_info, walletData)
+  .then(response => {
+    ctx.reply(`Wallet Information successfully saved. Saved Wallet Information id is ${response.data.id}`);
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    ctx.reply("Failed to save Wallet Information");
+  });
+
   console.log("workchain:", wallet.address.workChain);
-  ctx.reply(walletAddress);
+  ctx.reply(`Imported Wallet Address is ${walletAddress}`);
 })
 
 bot.command('showaddress', ctx => {
@@ -187,7 +215,8 @@ bot.command('getBalance', async ctx => {
     // Create wallet contract
     let workchain = 0; // Usually you need a workchain 0
     wallet = WalletContractV4.create({ workchain, publicKey: keyPair.publicKey });
-    let contract = testClient.open(wallet);
+    let contract = client.open(wallet);
+    sleep(1000);
     let balance = await contract.getBalance();
     console.log(BigInt(balance).toString());
     ctx.reply(BigInt(balance).toString());
@@ -220,4 +249,21 @@ bot.command('stop', ctx => {
   });
 })
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function init() {
+  await axios.get(url_wallet_info)
+  .then(response => {
+    if (response.data) {
+      walletAddress = response.data.wallet_address;
+      mnemonics = JSON.parse(response.data.mnemonics);
+    }
+  })
+  .catch(error => {
+    console.error('Error:', error);
+  });
+}
+init();
 bot.launch();
