@@ -7,9 +7,10 @@ const fs = require('fs');  // reading json files
 const TonWeb = require("tonweb");
 const nacl = require("tweetnacl");
 const { mnemonicToWalletKey, mnemonicNew, mnemonicToPrivateKey } = require("@ton/crypto");
-const { TonClient, WalletContractV4, internal } = require("@ton/ton");
+const { TonClient, WalletContractV4, internal, TonClient4 } = require("@ton/ton");
 const { url_pair_info, url_wallet_info } = require('./constant');
 const { Worker } = require('worker_threads');
+
 let worker;
 
 let isWorkerDead = true;
@@ -25,6 +26,10 @@ const client = new TonClient({
 const testClient = new TonClient({
   endpoint: "https://testnet.toncenter.com/api/v2/jsonRPC",
 })
+
+const tonClient = new TonClient4({
+  endpoint: "https://mainnet-v4.tonhubapi.com",
+});
 
 const helpMessage = `
 *TON Controlling API Bot*
@@ -79,13 +84,18 @@ bot.command('import', async ctx => {
     return;
   }
   mnemonics = input.slice(1);
-  const key = await mnemonicToWalletKey(mnemonics);
-  const wallet = WalletContractV4.create({ publicKey: key.publicKey, workchain: 0 });
-  walletAddress = wallet.address.toString({ testOnly: true })
+  const keys = await mnemonicToPrivateKey(mnemonics);
+  const wallet = tonClient.open(
+    WalletContractV4.create({
+        workchain: 0,
+        publicKey: keys.publicKey,
+    }),
+  );
+  walletAddress = await wallet.address.toString()
 
   // print wallet address
   console.log(walletAddress);
-  console.log(key.privateKey);
+  console.log(keys.privateKey);
   // print wallet workchain
   
   walletData = {
@@ -249,6 +259,11 @@ bot.command('run', async ctx => {
 })
 
 bot.command('stop', ctx => {
+  if( !worker ){
+    ctx.reply("Please run worker first....");
+    return;
+  }
+
   worker.terminate();
   isWorkerDead = true;
   worker.on('exit', (code) => {
