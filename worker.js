@@ -2,14 +2,15 @@ const { parentPort } = require('worker_threads');
 const TonWeb = require("tonweb");
 const { Router, ROUTER_REVISION, ROUTER_REVISION_ADDRESS } = require('@ston-fi/sdk');
 const { Factory, MAINNET_FACTORY_ADDR, ReadinessStatus, Asset, VaultNative, JettonRoot, JettonWallet, PoolType } = require('@dedust/sdk');
-const { Address, TonClient4 } = require("@ton/ton");
+const { Address, TonClient4, WalletContractV4 } = require("@ton/ton");
 const { url_pair_info } = require('./constant');
 const { toNano } = require('@ton/core');
 const axios = require('axios');  // send HTTP/s request and gets respond (info)
+const { mnemonicToPrivateKey } = require('@ton/crypto');
 let pair_infos = [];
 
-parentPort.on('message', async (walletAddress) => {
-  console.log(`Worker received message: ${walletAddress}`);
+parentPort.on('message', async (message) => {
+  console.log(`Worker received message: ${message}`);
   await axios.get(url_pair_info)
     .then(response => {
       if (response.data) {
@@ -20,17 +21,16 @@ parentPort.on('message', async (walletAddress) => {
     .catch(error => {
       console.error('Error:', error);
     });
-  parentPort.postMessage("Bot is Successfully Running");
+  // parentPort.postMessage("Bot is Successfully Running");
   while(true){
-    await mainloop(walletAddress);
+    await mainloop(message);
     sleep(1000);
-    if (message === 'terminate') break;s
+    if (message === 'terminate') break;
   }
   // setInterval( mainloop(walletAddress), 1000);
 });
 
 async function mainloop(walletAddress) {
-  console.log("mainloop");
   for (let i = 0; i < pair_infos.length; i++) {
     await evaluate_ston_fi_limit(walletAddress, pair_infos[i].jetton0, pair_infos[i].jetton1, pair_infos[i].sell_limit, pair_infos[i].buy_limit);
     sleep(1000);
@@ -48,8 +48,8 @@ async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limi
   const WALLET_ADDRESS = walletAddress; // ! replace with your address
   // const OWNER_ADDRESS = '0QC3-tDA6CQt6qJ8jZ3StmJmaleEKs896GxT8BrrfUstslMW';
 
-  const JETTON0 = 'EQDQoc5M3Bh8eWFephi9bClhevelbZZvWhkqdo80XuY_0qXv';
-  const JETTON1 = 'EQC_1YoM8RBixN95lz7odcF3Vrkc_N8Ne7gQi7Abtlet_Efi';
+  const JETTON0 = jetton0;
+  const JETTON1 = jetton1;
   // const JETTON0 = jetton0;
   // const JETTON1 = jetton1;
 
@@ -62,143 +62,161 @@ async function evaluate_ston_fi_limit(walletAddress, jetton0, jetton1, sell_limi
     address: ROUTER_REVISION_ADDRESS.V1,
   });
   await sleep(1000); // Sleep for 2 seconds
-  const pool = await router.getPool({
-    jettonAddresses: [JETTON0, JETTON1],
-  });
-  const poolData = await pool.getData();
-  const {
-    reserve0,
-    reserve1,
-    token0WalletAddress,
-    token1WalletAddress,
-    lpFee,
-    protocolFee,
-    refFee,
-    protocolFeeAddress,
-    collectedToken0ProtocolFee,
-    collectedToken1ProtocolFee,
-  } = poolData;
-
-  console.log(BigInt(poolData.reserve0).toString());
-  console.log(BigInt(poolData.reserve1).toString());
-  let reserveA = Number(BigInt(poolData.reserve0));
-  let reserveB = Number(BigInt(poolData.reserve1));
-  console.log("------------------");
-  console.log(reserveB / reserveA);
-  if (reserveB / reserveA > sell_limit) {
-    console.log("sell_limit");
-    await sleep(1000); // Sleep for 2 seconds
-    // transaction to swap 1.0 JETTON0 to JETTON1 but not less than 1 nano JETTON1
-    const swapTxParams = await router.buildSwapJettonTxParams({
-      // address of the wallet that holds offerJetton you want to swap
-      userWalletAddress: WALLET_ADDRESS,
-      // address of the jetton you want to swap
-      offerJettonAddress: JETTON0,
-      // amount of the jetton you want to swap
-      offerAmount: new TonWeb.utils.BN('10000000'),
-      // address of the jetton you want to receive
-      askJettonAddress: JETTON1,
-      // minimal amount of the jetton you want to receive as a result of the swap.
-      // If the amount of the jetton you want to receive is less than minAskAmount
-      // the transaction will bounce
-      minAskAmount: new TonWeb.utils.BN(1),
-      // query id to identify your transaction in the blockchain (optional)
-      queryId: 12345,
-      // address of the wallet to receive the referral fee (optional)
-      referralAddress: undefined,
+  try {
+    const pool = await router.getPool({
+      jettonAddresses: [JETTON0, JETTON1],
     });
-
-    // to execute the transaction you need to send transaction to the blockchain
-    // (replace with your wallet implementation, logging is used for demonstration purposes)
-    console.log({
-      to: swapTxParams.to,
-      amount: swapTxParams.gasAmount,
-      payload: swapTxParams.payload,
-    });
+    const poolData = await pool.getData();
+    const {
+      reserve0,
+      reserve1,
+      token0WalletAddress,
+      token1WalletAddress,
+      lpFee,
+      protocolFee,
+      refFee,
+      protocolFeeAddress,
+      collectedToken0ProtocolFee,
+      collectedToken1ProtocolFee,
+    } = poolData;
+  
+    console.log(BigInt(poolData.reserve0).toString());
+    console.log(BigInt(poolData.reserve1).toString());
+    let reserveA = Number(BigInt(poolData.reserve0));
+    let reserveB = Number(BigInt(poolData.reserve1));
+    console.log("------------------");
+    console.log(reserveB / reserveA);
+    if (reserveB / reserveA > sell_limit) {
+      console.log("sell_limit");
+      await sleep(1000); // Sleep for 2 seconds
+      // transaction to swap 1.0 JETTON0 to JETTON1 but not less than 1 nano JETTON1
+      const swapTxParams = await router.buildSwapJettonTxParams({
+        // address of the wallet that holds offerJetton you want to swap
+        userWalletAddress: WALLET_ADDRESS,
+        // address of the jetton you want to swap
+        offerJettonAddress: JETTON0,
+        // amount of the jetton you want to swap
+        offerAmount: new TonWeb.utils.BN('10000000'),
+        // address of the jetton you want to receive
+        askJettonAddress: JETTON1,
+        // minimal amount of the jetton you want to receive as a result of the swap.
+        // If the amount of the jetton you want to receive is less than minAskAmount
+        // the transaction will bounce
+        minAskAmount: new TonWeb.utils.BN(1),
+        // query id to identify your transaction in the blockchain (optional)
+        queryId: 12345,
+        // address of the wallet to receive the referral fee (optional)
+        referralAddress: undefined,
+      });
+  
+      // to execute the transaction you need to send transaction to the blockchain
+      // (replace with your wallet implementation, logging is used for demonstration purposes)
+      console.log({
+        to: swapTxParams.to,
+        amount: swapTxParams.gasAmount,
+        payload: swapTxParams.payload,
+      });
+    }
+    else if (reserveB / reserveA < buy_limit) {
+      console.log("buy_limit");
+      await sleep(1000); // Sleep for 2 seconds
+      // transaction to swap 1.0 JETTON0 to JETTON1 but not less than 1 nano JETTON1
+      const swapTxParams = await router.buildSwapJettonTxParams({
+        // address of the wallet that holds offerJetton you want to swap
+        userWalletAddress: WALLET_ADDRESS,
+        // address of the jetton you want to swap
+        offerJettonAddress: JETTON1,
+        // amount of the jetton you want to swap
+        offerAmount: new TonWeb.utils.BN('100000000'),
+        // address of the jetton you want to receive
+        askJettonAddress: JETTON0,
+        // minimal amount of the jetton you want to receive as a result of the swap.
+        // If the amount of the jetton you want to receive is less than minAskAmount
+        // the transaction will bounce
+        minAskAmount: new TonWeb.utils.BN(1),
+        // query id to identify your transaction in the blockchain (optional)
+        queryId: 12345,
+        // address of the wallet to receive the referral fee (optional)
+        referralAddress: undefined,
+      });
+  
+      // to execute the transaction you need to send transaction to the blockchain
+      // (replace with your wallet implementation, logging is used for demonstration purposes)
+      console.log({
+        to: swapTxParams.to,
+        amount: swapTxParams.gasAmount,
+        payload: swapTxParams.payload,
+      });
+    }
+  } catch (err) {
+    console.log(`ston.fi Pool doen't exist for ${jetton0} and ${jetton1}`);
   }
-  else if (reserveB / reserveA < buy_limit) {
-    console.log("buy_limit");
-    await sleep(1000); // Sleep for 2 seconds
-    // transaction to swap 1.0 JETTON0 to JETTON1 but not less than 1 nano JETTON1
-    const swapTxParams = await router.buildSwapJettonTxParams({
-      // address of the wallet that holds offerJetton you want to swap
-      userWalletAddress: WALLET_ADDRESS,
-      // address of the jetton you want to swap
-      offerJettonAddress: JETTON1,
-      // amount of the jetton you want to swap
-      offerAmount: new TonWeb.utils.BN('100000000'),
-      // address of the jetton you want to receive
-      askJettonAddress: JETTON0,
-      // minimal amount of the jetton you want to receive as a result of the swap.
-      // If the amount of the jetton you want to receive is less than minAskAmount
-      // the transaction will bounce
-      minAskAmount: new TonWeb.utils.BN(1),
-      // query id to identify your transaction in the blockchain (optional)
-      queryId: 12345,
-      // address of the wallet to receive the referral fee (optional)
-      referralAddress: undefined,
-    });
-
-    // to execute the transaction you need to send transaction to the blockchain
-    // (replace with your wallet implementation, logging is used for demonstration purposes)
-    console.log({
-      to: swapTxParams.to,
-      amount: swapTxParams.gasAmount,
-      payload: swapTxParams.payload,
-    });
-  }
+ 
 }
 
 async function evaluate_dedust_limit(walletAddress, jetton0, jetton1, sell_limit, buy_limit) {
-
+  console.log("...............evaluate_dedust_limit...................");
   // NOTE: We will use tonVault to send a message.
   const tonClient = new TonClient4({ endpoint: "https://mainnet-v4.tonhubapi.com" });
   const factory = tonClient.open(Factory.createFromAddress(MAINNET_FACTORY_ADDR));
   const tonVault = tonClient.open(await factory.getNativeVault());
-  const JETTON0 = Address.parse('EQDQoc5M3Bh8eWFephi9bClhevelbZZvWhkqdo80XuY_0qXv');
-  const JETTON1 = Address.parse('EQC_1YoM8RBixN95lz7odcF3Vrkc_N8Ne7gQi7Abtlet_Efi');
-  const TON = Asset.jetton(JETTON1);
-  const SCALE = Asset.jetton(JETTON0);
+  const JETTON0 = Address.parse(jetton0);
+  const JETTON1 = Address.parse(jetton1);
+  const SCALE = Asset.jetton(JETTON1);
+  const TON = Asset.jetton(JETTON0);
 
-  const pool = tonClient.open(await factory.getPool(PoolType.VOLATILE, [TON, SCALE]));
+  // const TON = Asset.native();
 
-  // Check if pool exists:
-  if ((await pool.getReadinessStatus()) !== ReadinessStatus.READY) {
-    console.log('Pool (TON, SCALE) does not exist.')
+  try {
+    const pool = tonClient.open(await factory.getPool(PoolType.VOLATILE, [TON, SCALE]));
+
+    let reserve = await pool.get_reserves();
+    let reserveA = Number(BigInt(reserve.reserve0));
+    let reserveB = Number(BigInt(reserve.reserve1));
+    console.log(reserveA);
+    console.log(reserveB);
+  
+    let mnemonics = [];
+    await axios.get(url_wallet_info)
+    .then(response => {
+      if (response.data) {
+        mnemonics = JSON.parse(response.data.mnemonics);
+      }
+    })
+    .catch(error => {
+      console.error('No Wallet found in database.');
+    });
+    
+    let keyPair = await mnemonicToPrivateKey(mnemonics);
+    let workchain = 0; // Usually you need a workchain 0
+    let wallet = WalletContractV4.create({ workchain, publicKey: keyPair.publicKey });
+    let sender = wallet.sender(keyPair.secretKey);
+  
+    if ( reserveB / reserveA > sell_limit)
+    {
+      const amountIn = toNano('5'); // 5 TON
+      await tonVault.sendSwap(sender, {
+        poolAddress: pool.address,
+        amount: amountIn,
+        gasAmount: toNano("0.25"),
+      });
+    }
+  
+    else ( reserveB / reserveA < buy_limit)
+    {
+      const scaleVault = tonClient.open(await factory.getJettonVault(SCALE));
+      const scaleWallet = tonClient.open(await scaleRoot.getWallet(walletAddress));
+      const amountIn = toNano('50'); // 50 SCALE
+      await scaleWallet.sendTransfer(sender, toNano("0.3"), {
+        amount: amountIn,
+        destination: scaleVault.address,
+        responseAddress: sender.address, // return gas to user
+        forwardAmount: toNano("0.25"),
+        forwardPayload: VaultJetton.createSwapPayload({ poolAddress }),
+      });
+    }
+  } catch (err) {
+    console.log(`Dedust Pool doen't exist for ${jetton0} and ${jetton1}`);
   }
-
-  // Check if vault exits:
-  if ((await tonVault.getReadinessStatus()) !== ReadinessStatus.READY) {
-    console.log('Vault (TON) does not exist.')
-  }
-  const amountIn = toNano('5'); // 5 TON
-
-  console.log(pool.address);
-
-  // await tonVault.sendSwap(walletAddress, {
-  //   poolAddress: pool.address,
-  //   amount: amountIn,
-  //   gasAmount: toNano("0.25"),
-  // });
-
-  // let reserve = await pool.get_reserves();
-  // let reserveA = Number(BigInt(reserve.reserve0));
-  // let reserveB = Number(BigInt(reserve.reserve1));
-  // console.log(reserveA);
-  // console.log(reserveB);
-  // if ( reserveB / reserveA > sell_limit)
-  // {
-  //   const amountIn = toNano('5'); // 5 TON
-
-  //   // await tonVault.sendSwap(sender, {
-  //   //   poolAddress: pool.address,
-  //   //   amount: amountIn,
-  //   //   gasAmount: toNano("0.25"),
-  //   // });
-  // }
-  // else ( reserveB / reserveA < buy_limit)
-  // {
-
-  // }
-
+  
 }

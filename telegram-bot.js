@@ -10,12 +10,13 @@ const { mnemonicToWalletKey, mnemonicNew, mnemonicToPrivateKey } = require("@ton
 const { TonClient, WalletContractV4, internal } = require("@ton/ton");
 const { url_pair_info, url_wallet_info } = require('./constant');
 const { Worker } = require('worker_threads');
-const worker = new Worker('./worker.js');
+let worker;
 
 let isWorkerDead = true;
 let wallet, walletAddress = "";
 let mnemonics = [];
 let wallet_info ;
+let workchain = 0; // Usually you need a workchain 0
 // Create Client
 const client = new TonClient({
   endpoint: 'https://toncenter.com/api/v2/jsonRPC',
@@ -51,7 +52,7 @@ bot.command('create', async ctx => {
   mnemonics = await mnemonicNew();
   let keyPair = await mnemonicToPrivateKey(mnemonics);
   // Create wallet contract
-  let workchain = 0; // Usually you need a workchain 0
+  
   wallet = WalletContractV4.create({ workchain, publicKey: keyPair.publicKey });
   walletAddress = wallet.address.toString({ testOnly: true })  
 
@@ -213,8 +214,9 @@ bot.command('getBalance', async ctx => {
   if (walletAddress && mnemonics) {
     let keyPair = await mnemonicToPrivateKey(mnemonics);
     // Create wallet contract
-    let workchain = 0; // Usually you need a workchain 0
+    
     wallet = WalletContractV4.create({ workchain, publicKey: keyPair.publicKey });
+    const sender = wallet.sender(keyPair.secretKey);
     let contract = client.open(wallet);
     sleep(1000);
     let balance = await contract.getBalance();
@@ -226,24 +228,30 @@ bot.command('getBalance', async ctx => {
   }
 })
 
-bot.command('run', ctx => {
-  if( !walletAddress ){
+bot.command('run', async ctx => {
+  if( !walletAddress || !mnemonics) {
     ctx.reply("Please Connect Wallet First"); 
     return;
   }
-  
-  worker.postMessage(walletAddress);
-  worker.on('message', (message) => {
-    console.log(`Main received message: ${message}`);
+  // worker = new Worker('./worker.js');
+  if( isWorkerDead ){
+    worker = new Worker('./worker.js');
+    worker.postMessage(walletAddress);
     isWorkerDead = false;
-    ctx.reply("Now Worker is Running on Ton Chain"); 
-  });
+    ctx.reply("Now Worker is Running on Ton Chain");
+  }
+  else {
+    ctx.reply("A Worker is Already Running on Ton Chain"); 
+  }
+  // worker.on('message', (message) => {
+  //   console.log(`Main received message: ${message}`);
+  // });
 })
 
 bot.command('stop', ctx => {
   worker.terminate();
+  isWorkerDead = true;
   worker.on('exit', (code) => {
-    isWorkerDead = true;
     console.log(`Worker exited with code ${code}`);
     ctx.reply("Worker exited. Bye....");
   });
@@ -262,7 +270,7 @@ async function init() {
     }
   })
   .catch(error => {
-    console.error('Error:', error);
+    console.error('No Wallet found in database.');
   });
 }
 init();
